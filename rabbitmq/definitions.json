@@ -1,0 +1,260 @@
+{
+  "vhosts": [
+    {
+      "name": "/",
+      "description": "FIAP X local RabbitMQ vhost",
+      "tags": []
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "video.processing.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "video.processing.retry.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "video.processing.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "video.events",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "video.status.retry.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "video.status.dlx",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "video.processing",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.processing.retry",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.processing.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.status-updates",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.status-updates.retry",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "video.status-updates.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    }
+  ],
+  "bindings": [
+    {
+      "source": "video.processing.exchange",
+      "vhost": "/",
+      "destination": "video.processing",
+      "destination_type": "queue",
+      "routing_key": "video.uploaded",
+      "arguments": {}
+    },
+    {
+      "source": "video.processing.retry.exchange",
+      "vhost": "/",
+      "destination": "video.processing.retry",
+      "destination_type": "queue",
+      "routing_key": "video.uploaded",
+      "arguments": {}
+    },
+    {
+      "source": "video.processing.dlx",
+      "vhost": "/",
+      "destination": "video.processing.dlq",
+      "destination_type": "queue",
+      "routing_key": "video.processing.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "video.events",
+      "vhost": "/",
+      "destination": "video.status-updates",
+      "destination_type": "queue",
+      "routing_key": "video.processing.started",
+      "arguments": {}
+    },
+    {
+      "source": "video.events",
+      "vhost": "/",
+      "destination": "video.status-updates",
+      "destination_type": "queue",
+      "routing_key": "video.processing.completed",
+      "arguments": {}
+    },
+    {
+      "source": "video.events",
+      "vhost": "/",
+      "destination": "video.status-updates",
+      "destination_type": "queue",
+      "routing_key": "video.processing.failed",
+      "arguments": {}
+    },
+    {
+      "source": "video.status.retry.exchange",
+      "vhost": "/",
+      "destination": "video.status-updates.retry",
+      "destination_type": "queue",
+      "routing_key": "video.processing.started",
+      "arguments": {}
+    },
+    {
+      "source": "video.status.retry.exchange",
+      "vhost": "/",
+      "destination": "video.status-updates.retry",
+      "destination_type": "queue",
+      "routing_key": "video.processing.completed",
+      "arguments": {}
+    },
+    {
+      "source": "video.status.retry.exchange",
+      "vhost": "/",
+      "destination": "video.status-updates.retry",
+      "destination_type": "queue",
+      "routing_key": "video.processing.failed",
+      "arguments": {}
+    },
+    {
+      "source": "video.status.dlx",
+      "vhost": "/",
+      "destination": "video.status-updates.dlq",
+      "destination_type": "queue",
+      "routing_key": "video.status.dlq",
+      "arguments": {}
+    }
+  ],
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "fiapx-processing-main-at-least-once-dlx",
+      "pattern": "^video\\.processing$",
+      "apply-to": "quorum_queues",
+      "definition": {
+        "dead-letter-exchange": "video.processing.dlx",
+        "dead-letter-routing-key": "video.processing.dlq",
+        "dead-letter-strategy": "at-least-once",
+        "delivery-limit": -1,
+        "overflow": "reject-publish"
+      },
+      "priority": 100
+    },
+    {
+      "vhost": "/",
+      "name": "fiapx-processing-retry-at-least-once-dlx",
+      "pattern": "^video\\.processing\\.retry$",
+      "apply-to": "quorum_queues",
+      "definition": {
+        "dead-letter-exchange": "video.processing.exchange",
+        "dead-letter-routing-key": "video.uploaded",
+        "dead-letter-strategy": "at-least-once",
+        "delivery-limit": -1,
+        "overflow": "reject-publish"
+      },
+      "priority": 100
+    },
+    {
+      "vhost": "/",
+      "name": "fiapx-status-main-at-least-once-dlx",
+      "pattern": "^video\\.status-updates$",
+      "apply-to": "quorum_queues",
+      "definition": {
+        "dead-letter-exchange": "video.status.dlx",
+        "dead-letter-routing-key": "video.status.dlq",
+        "dead-letter-strategy": "at-least-once",
+        "delivery-limit": -1,
+        "overflow": "reject-publish"
+      },
+      "priority": 100
+    },
+    {
+      "vhost": "/",
+      "name": "fiapx-status-retry-at-least-once-dlx",
+      "pattern": "^video\\.status-updates\\.retry$",
+      "apply-to": "quorum_queues",
+      "definition": {
+        "dead-letter-exchange": "video.events",
+        "dead-letter-strategy": "at-least-once",
+        "delivery-limit": -1,
+        "overflow": "reject-publish"
+      },
+      "priority": 100
+    }
+  ]
+}
