@@ -1,0 +1,223 @@
+name: fiap-fase5
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.1
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-http://localhost:8081}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fiapx_videos}
+      POSTGRES_USER: ${POSTGRES_USER:-fiapx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fiapx_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.22.3
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_WEB_PORT:-8025}:8025"
+
+  rabbitmq:
+    image: rabbitmq:4.1.8-management
+    command: >
+      sh -ec '
+        rm -f /tmp/fiapx-definitions-imported
+        (
+          set -e
+          until rabbitmqctl await_startup --timeout 30; do
+            echo "waiting for RabbitMQ startup"
+            sleep 2
+          done
+          user="$${RABBITMQ_DEFAULT_USER}"
+          pass="$${RABBITMQ_DEFAULT_PASS}"
+          if rabbitmqctl list_users --silent | cut -f1 | grep -qx "$$user"; then
+            rabbitmqctl change_password "$$user" "$$pass"
+          else
+            rabbitmqctl add_user "$$user" "$$pass"
+          fi
+          rabbitmqctl set_user_tags "$$user" administrator
+          rabbitmqctl add_vhost / || true
+          rabbitmqctl set_permissions -p / "$$user" ".*" ".*" ".*"
+          rabbitmqctl import_definitions /etc/rabbitmq/definitions.json
+          touch /tmp/fiapx-definitions-imported
+        ) &
+        exec rabbitmq-server
+      '
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-fiapx}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-fiapx_dev_password}
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping && test -f /tmp/fiapx-definitions-imported"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fiapx-dev}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-fiapx_dev_password}
+      MINIO_NOTIFY_AMQP_ENABLE_PRIMARY: "on"
+      MINIO_NOTIFY_AMQP_URL_PRIMARY: "amqp://${RABBITMQ_DEFAULT_USER:-fiapx}:${RABBITMQ_DEFAULT_PASS:-fiapx_dev_password}@rabbitmq:5672"
+      MINIO_NOTIFY_AMQP_EXCHANGE_PRIMARY: video.processing.exchange
+      MINIO_NOTIFY_AMQP_EXCHANGE_TYPE_PRIMARY: direct
+      MINIO_NOTIFY_AMQP_ROUTING_KEY_PRIMARY: video.uploaded
+      MINIO_NOTIFY_AMQP_DURABLE_PRIMARY: "on"
+      MINIO_NOTIFY_AMQP_DELIVERY_MODE_PRIMARY: "2"
+      MINIO_NOTIFY_AMQP_MANDATORY_PRIMARY: "on"
+      MINIO_NOTIFY_AMQP_PUBLISHING_CONFIRMS_PRIMARY: "on"
+      MINIO_NOTIFY_AMQP_QUEUE_DIR_PRIMARY: /events/amqp-primary
+      MINIO_NOTIFY_AMQP_QUEUE_LIMIT_PRIMARY: "10000"
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+      - minio-events:/events
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fiapx-dev}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-fiapx_dev_password}
+      MINIO_BUCKET: ${MINIO_BUCKET:-videos}
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "set -eu
+      && mc alias set local http://minio:9000 \"$${MINIO_ROOT_USER}\" \"$${MINIO_ROOT_PASSWORD}\"
+      && mc mb --ignore-existing \"local/$${MINIO_BUCKET}\"
+      && mc anonymous set none \"local/$${MINIO_BUCKET}\"
+      && AMQP_ARN='arn:minio:sqs::PRIMARY:amqp'
+      && until mc event add --event put --prefix videos/ --suffix /original.mp4 --ignore-existing \"local/$${MINIO_BUCKET}\" \"$${AMQP_ARN}\"; do echo 'waiting for MinIO AMQP target'; sleep 2; done
+      && mc event ls \"local/$${MINIO_BUCKET}\" \"$${AMQP_ARN}\""
+
+  video-management-migrations:
+    image: ${VIDEO_MANAGEMENT_IMAGE}
+    command: ["dotnet", "FiapX.VideoManagement.Api.dll", "--migrate"]
+    environment: &video_management_environment
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      POSTGRES_CONNECTION_STRING: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-fiapx_videos};Username=${POSTGRES_USER:-fiapx};Password=${POSTGRES_PASSWORD:-fiapx_dev_password}"
+      REDIS_CONNECTION_STRING: redis:6379
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-30}
+      JWT_METADATA_ADDRESS: ${JWT_METADATA_ADDRESS:-http://keycloak:8080/realms/fiapx/.well-known/openid-configuration}
+      JWT_ISSUER: ${JWT_ISSUER:-http://localhost:8081/realms/fiapx}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-video-management-service}
+      MINIO_INTERNAL_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-fiapx-dev}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-fiapx_dev_password}
+      MINIO_BUCKET: ${MINIO_BUCKET:-videos}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      PRESIGNED_URL_EXPIRES_SECONDS: ${PRESIGNED_URL_EXPIRES_SECONDS:-900}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@fiapx.local}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-fiapx}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-fiapx_dev_password}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      STATUS_MAX_ATTEMPTS: ${STATUS_MAX_ATTEMPTS:-3}
+      STATUS_RETRY_DELAY_MS: ${STATUS_RETRY_DELAY_MS:-5000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  video-management-service:
+    image: ${VIDEO_MANAGEMENT_IMAGE}
+    environment: *video_management_environment
+    ports:
+      - "${VIDEO_MANAGEMENT_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      video-management-migrations:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  video-processing-service:
+    image: ${VIDEO_PROCESSING_IMAGE}
+    environment:
+      DOTNET_ENVIRONMENT: Development
+      MINIO_INTERNAL_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-fiapx-dev}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-fiapx_dev_password}
+      MINIO_BUCKET: ${MINIO_BUCKET:-videos}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_REQUEST_TIMEOUT_SECONDS: ${MINIO_REQUEST_TIMEOUT_SECONDS:-3}
+      MINIO_MAX_ERROR_RETRY: ${MINIO_MAX_ERROR_RETRY:-0}
+      FFMPEG_PATH: ffmpeg
+      FIAPX_PROCESSING_TEMP_ROOT: /tmp
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USERNAME: ${RABBITMQ_DEFAULT_USER:-fiapx}
+      RABBITMQ_PASSWORD: ${RABBITMQ_DEFAULT_PASS:-fiapx_dev_password}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
+      PROCESSING_MAX_ATTEMPTS: ${PROCESSING_MAX_ATTEMPTS:-3}
+      PROCESSING_RETRY_DELAY_MS: ${PROCESSING_RETRY_DELAY_MS:-5000}
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  minio-events:
+  rabbitmq-data:

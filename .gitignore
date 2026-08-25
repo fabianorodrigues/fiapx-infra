@@ -38,6 +38,15 @@ ScaffoldingReadMe.txt
 
 # dotenv environment variables file
 .env
+.env.local
+!.env.example
+
+# Local runtime artifacts
+artifacts/
+logs/
+*.log
+*.tmp
+*.temp
 
 # Others
 ~$*

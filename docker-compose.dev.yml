@@ -1,0 +1,10 @@
+services:
+  video-management-service:
+    build:
+      context: ../fiapx-video-management
+      dockerfile: src/FiapX.VideoManagement.Api/Dockerfile
+
+  video-processing-service:
+    build:
+      context: ../fiapx-video-processing
+      dockerfile: src/FiapX.VideoProcessing.Worker/Dockerfile
