@@ -96,5 +96,39 @@
         }
       ]
     }
+  ],
+  "users": [
+    {
+      "username": "usertest1",
+      "enabled": true,
+      "firstName": "User Test",
+      "lastName": "One",
+      "email": "usertest1@fiapx.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "fiapx_usertest1_demo_password",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "usertest2",
+      "enabled": true,
+      "firstName": "User Test",
+      "lastName": "Two",
+      "email": "usertest2@fiapx.local",
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "fiapx_usertest2_demo_password",
+          "temporary": false
+        }
+      ]
+    }
   ]
 }

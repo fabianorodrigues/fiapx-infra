@@ -36,9 +36,9 @@ ScaffoldingReadMe.txt
 # NuGet Symbol Packages
 *.snupkg
 
-# dotenv environment variables file
+# dotenv environment variables files
 .env
-.env.local
+.env.*
 !.env.example
 
 # Local runtime artifacts
