@@ -1,6 +1,6 @@
 param(
     [string]$InfraPath = $env:DEPLOY_INFRA_PATH,
-    [string]$ExpectedSha = $env:GITHUB_SHA,
+    [string]$DeploySha = $env:DEPLOY_SHA,
     [string]$Repository = $env:GITHUB_REPOSITORY,
     [string]$GitHubServerUrl = $env:GITHUB_SERVER_URL,
     [string]$GitHubToken = $env:GITHUB_TOKEN,
@@ -39,6 +39,18 @@ function Assert-NotBlank {
 
     if ([string]::IsNullOrWhiteSpace($Value)) {
         throw "$Name must not be empty."
+    }
+}
+
+function Assert-CommitSha {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowNull()][string]$Value
+    )
+
+    Assert-NotBlank -Name $Name -Value $Value
+    if ($Value -notmatch '^[a-fA-F0-9]{40}$') {
+        throw "$Name must be a full 40-character commit SHA."
     }
 }
 
@@ -297,7 +309,7 @@ function Assert-GitClean {
 
 function Ensure-OperationalCopy {
     Assert-NotBlank -Name 'DEPLOY_INFRA_PATH' -Value $InfraPath
-    Assert-NotBlank -Name 'GITHUB_SHA' -Value $ExpectedSha
+    Assert-CommitSha -Name 'DEPLOY_SHA/DeploySha' -Value $DeploySha
     Assert-NotBlank -Name 'GITHUB_REPOSITORY' -Value $Repository
 
     if ([string]::IsNullOrWhiteSpace($GitHubServerUrl)) {
@@ -329,12 +341,12 @@ function Ensure-OperationalCopy {
         }
     }
 
-    [void](Invoke-GitWithToken '-C' $InfraPath 'fetch' '--no-tags' '--depth' '1' 'origin' $ExpectedSha)
-    [void](Invoke-GitOutput '-C' $InfraPath 'checkout' '--detach' $ExpectedSha)
+    [void](Invoke-GitWithToken '-C' $InfraPath 'fetch' '--no-tags' '--depth' '1' 'origin' $DeploySha)
+    [void](Invoke-GitOutput '-C' $InfraPath 'checkout' '--detach' $DeploySha)
 
     $head = ((Invoke-GitOutput '-C' $InfraPath 'rev-parse' 'HEAD') | Select-Object -First 1).Trim()
-    if (-not $head.Equals($ExpectedSha, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Operational checkout did not reach expected SHA. Expected=$ExpectedSha Actual=$head"
+    if (-not $head.Equals($DeploySha, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Operational checkout did not reach deploy SHA. Expected=$DeploySha Actual=$head"
     }
 
     $script:OperationalHead = $head
@@ -598,6 +610,7 @@ function Add-StepSummary {
         '| Item | Value |',
         '| --- | --- |',
         "| Operational path | $InfraPath |",
+        "| Deploy SHA | $DeploySha |",
         "| Operational HEAD | $script:OperationalHead |",
         "| .env created | $script:EnvCreated |",
         "| Management image | $script:ManagementImage |",
@@ -612,6 +625,8 @@ function Add-StepSummary {
 }
 
 function Invoke-Deploy {
+    Assert-CommitSha -Name 'DEPLOY_SHA/DeploySha' -Value $DeploySha
+
     [void](Invoke-DockerOutput 'version')
     [void](Invoke-DockerOutput 'compose' 'version')
 

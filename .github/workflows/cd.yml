@@ -1,0 +1,139 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Guard Current Main
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
+    permissions:
+      contents: read
+    outputs:
+      should_deploy: ${{ steps.stale-guard.outputs.should_deploy }}
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check current main HEAD
+        id: stale-guard
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sha_regex='^[0-9a-fA-F]{40}$'
+          if [[ -z "${DEPLOY_SHA:-}" || ! "$DEPLOY_SHA" =~ $sha_regex ]]; then
+            echo "DEPLOY_SHA is empty or is not a full commit SHA." >&2
+            exit 1
+          fi
+
+          if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+            echo "GITHUB_TOKEN is empty." >&2
+            exit 1
+          fi
+
+          response_file="$(mktemp)"
+          status_code="$(curl --silent --show-error --location \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/git/ref/heads/main")"
+
+          if [[ "$status_code" != "200" ]]; then
+            echo "GitHub API returned unexpected HTTP status: ${status_code}" >&2
+            exit 1
+          fi
+
+          current_main_sha="$(python3 - "$response_file" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          git_object = payload.get("object")
+          if not isinstance(git_object, dict):
+              raise SystemExit("GitHub API response is missing object.")
+
+          object_type = git_object.get("type")
+          if object_type != "commit":
+              raise SystemExit("GitHub API response object is not a commit.")
+
+          sha = git_object.get("sha")
+          if not isinstance(sha, str):
+              raise SystemExit("GitHub API response is missing object.sha.")
+
+          print(sha)
+          PY
+          )"
+
+          if [[ -z "$current_main_sha" || ! "$current_main_sha" =~ $sha_regex ]]; then
+            echo "Current main HEAD is empty or is not a full commit SHA." >&2
+            exit 1
+          fi
+
+          if [[ "${current_main_sha,,}" == "${DEPLOY_SHA,,}" ]]; then
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### CD Guard"
+            echo ""
+            echo "SKIPPED: superseded by newer main commit"
+            echo ""
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Deploy SHA | ${DEPLOY_SHA} |"
+            echo "| Current main HEAD | ${current_main_sha} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy Infra
+    needs: guard
+    runs-on: [self-hosted, Windows, X64, fiap-fase5]
+    timeout-minutes: 45
+    if: ${{ needs.guard.outputs.should_deploy == 'true' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
+    permissions:
+      contents: read
+    env:
+      DEPLOY_INFRA_PATH: ${{ vars.DEPLOY_INFRA_PATH }}
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+      BOOTSTRAP_VIDEO_MANAGEMENT_IMAGE: ${{ vars.BOOTSTRAP_VIDEO_MANAGEMENT_IMAGE }}
+      BOOTSTRAP_VIDEO_PROCESSING_IMAGE: ${{ vars.BOOTSTRAP_VIDEO_PROCESSING_IMAGE }}
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Runner environment info
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
+        run: |
+          $PSVersionTable
+          docker version
+          docker compose version
+          docker ps
+
+      - name: Deploy Infra
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
+        run: .\.github\scripts\deploy-infra.ps1
