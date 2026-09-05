@@ -278,8 +278,8 @@ $script:VideoManagementImage = Require-Env "VIDEO_MANAGEMENT_IMAGE"
 $script:VideoProcessingImage = Require-Env "VIDEO_PROCESSING_IMAGE"
 $KeycloakAdminUser = Require-Env "KEYCLOAK_ADMIN_USERNAME"
 $KeycloakAdminPassword = Require-Env "KEYCLOAK_ADMIN_PASSWORD"
-$AliceUser = Get-EnvOrDefault "FIAPX_E2E_ALICE_USERNAME" "alice"
-$AlicePassword = Require-Env "FIAPX_E2E_ALICE_PASSWORD"
+$E2EUser = Get-EnvOrDefault "FIAPX_E2E_USERTEST1_USERNAME" "usertest1"
+$E2EPassword = Get-EnvOrDefault "FIAPX_E2E_USERTEST1_PASSWORD" "fiapx_usertest1_demo_password"
 $RabbitUser = Get-EnvOrDefault "RABBITMQ_DEFAULT_USER" "fiapx"
 $RabbitPassword = Get-EnvOrDefault "RABBITMQ_DEFAULT_PASS" "fiapx_dev_password"
 $RabbitManagementPort = Get-EnvOrDefault "RABBITMQ_MANAGEMENT_PORT" "15672"
@@ -1033,11 +1033,11 @@ function Run-E2E {
     Assert-RabbitTopology
 
     if ($BootstrapUsers -or ((Get-EnvOrDefault "FIAPX_E2E_BOOTSTRAP_USERS" "false") -eq "true")) {
-        Ensure-KeycloakUser $AliceUser $AlicePassword
+        Ensure-KeycloakUser $E2EUser $E2EPassword
     }
 
-    $auth = Get-AccessToken $AliceUser $AlicePassword
-    Add-Evidence "auth" @{ username = $AliceUser; userId = $auth.userId }
+    $auth = Get-AccessToken $E2EUser $E2EPassword
+    Add-Evidence "auth" @{ username = $E2EUser; userId = $auth.userId }
 
     Invoke-Success $auth "A-success" | Out-Null
 
