@@ -23,6 +23,13 @@ Infraestrutura Docker Compose da solução FiapX, responsável por subir o ambie
 
 ---
 
+## Documentação e apresentação
+
+- [Acessar documentação completa](https://fabianorodrigues.github.io/fiap-fase5-docs/)
+- [Assistir vídeo de apresentação](https://youtu.be/EvCfwoXaBsc)
+
+---
+
 ## Visão geral
 
 Este é o repositório inicial para quem quer executar a solução FiapX completa. Ele concentra o Compose integrado e os artefatos versionados necessários para provisionar o ambiente local/demonstrativo.
