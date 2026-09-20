@@ -111,20 +111,22 @@ Para execução local integrada:
 
 | Requisito | Observação |
 | --- | --- |
-| Docker + Docker Compose | Necessário para todos os serviços |
-| PowerShell | Necessário para o script E2E |
-| Repositórios irmãos no mesmo diretório pai | Necessário somente no modo dev com `docker-compose.dev.yml` |
+| Windows com Docker Desktop | Necessário para todos os serviços |
+| Docker Compose | Usado pelos comandos deste README |
+| Git e PowerShell | Necessários para clone, scripts e validações |
+| Postman e um arquivo `.mp4` | Necessários para validação E2E manual |
+| Repositórios irmãos no mesmo diretório pai | Necessário no modo dev com `docker-compose.dev.yml` |
 
 Estrutura esperada para build local:
 
 ```text
-fiap-fase5/
-  fiapx-infra/
-  fiapx-video-management/
-  fiapx-video-processing/
+C:\Projetos\fiap-fase5\
+  fiapx-infra\
+  fiapx-video-management\
+  fiapx-video-processing\
 ```
 
-Para deploy via GitHub Actions, o runner self-hosted Windows também precisa ter Docker, Docker Compose, PowerShell e acesso ao GHCR das imagens publicadas pelos repositórios dos serviços.
+Para deploy via GitHub Actions, cada runner self-hosted Windows também precisa ter Docker Desktop, Docker Compose, Git, PowerShell e acesso ao GHCR das imagens publicadas pelos repositórios dos serviços.
 
 ---
 
@@ -134,20 +136,21 @@ Para deploy via GitHub Actions, o runner self-hosted Windows também precisa ter
 
 | Item | Classificação | Uso |
 | --- | --- | --- |
-| `.env.example` | JÁ VERSIONADO | Modelo DEMO/local. Não deve receber secrets reais |
+| `.env.example` | JÁ VERSIONADO | Modelo DEMO/local e referência de credenciais locais |
 | `.env` | LOCAL/NÃO VERSIONADO | Fonte operacional para execução local e CD |
-| `VIDEO_MANAGEMENT_IMAGE` | MANUAL OBRIGATÓRIO no modo image-only | Imagem da API usada pelo Compose base |
-| `VIDEO_PROCESSING_IMAGE` | MANUAL OBRIGATÓRIO no modo image-only | Imagem do Worker usada pelo Compose base |
-| `BOOTSTRAP_VIDEO_MANAGEMENT_IMAGE` | MANUAL OBRIGATÓRIO no CD se `.env` ainda não existir | Primeira imagem da API para criar `.env` |
-| `BOOTSTRAP_VIDEO_PROCESSING_IMAGE` | MANUAL OBRIGATÓRIO no CD se `.env` ainda não existir | Primeira imagem do Worker para criar `.env` |
+| `VIDEO_MANAGEMENT_IMAGE` | MANUAL no modo image-only/CD | Imagem da API usada pelo Compose base |
+| `VIDEO_PROCESSING_IMAGE` | MANUAL no modo image-only/CD | Imagem do Worker usada pelo Compose base |
+| `BOOTSTRAP_VIDEO_MANAGEMENT_IMAGE` | CONDICIONAL no CD da infra | Primeira imagem da API se o CD precisar criar `.env` |
+| `BOOTSTRAP_VIDEO_PROCESSING_IMAGE` | CONDICIONAL no CD da infra | Primeira imagem do Worker se o CD precisar criar `.env` |
 
-Para uso local, crie um `.env` a partir do exemplo:
+Para uso local, crie o `.env` a partir do exemplo:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-O `.env` é ignorado pelo Git. Use placeholders como `<SEU_VALOR>` para qualquer valor privado e nunca versionar tokens, PATs, JWTs, connection strings privadas, SMTP real ou credenciais de ambiente real.
+> [!IMPORTANT]
+> O `.env` é ignorado pelo Git. Não versionar tokens, PATs, JWTs, connection strings privadas, SMTP real ou credenciais de ambiente real.
 
 ### Usuários DEMO
 
@@ -158,48 +161,86 @@ O realm Keycloak versionado cria dois usuários para demonstração local:
 | `usertest1` | `usertest1@fiapx.local` |
 | `usertest2` | `usertest2@fiapx.local` |
 
-As senhas desses usuários estão versionadas propositalmente nas fixtures DEMO/local para facilitar a demonstração. Elas são exclusivamente locais, não são seguras para ambiente real e não devem ser reutilizadas fora deste contexto.
+As senhas DEMO desses usuários e as credenciais de Keycloak, MinIO e RabbitMQ ficam em `.env.example`. Elas são exclusivamente locais e não devem ser reutilizadas fora deste contexto.
 
 ### Provisionamento automático e manual
 
 | Item | Classificação | Detalhe |
 | --- | --- | --- |
-| PostgreSQL container | AUTOMÁTICO | Criado pelo Compose |
-| Migrations da API | AUTOMÁTICO | Executadas pelo serviço `video-management-migrations` |
-| Redis container | AUTOMÁTICO | Criado pelo Compose |
-| RabbitMQ container | AUTOMÁTICO | Criado pelo Compose |
-| Exchanges, filas e bindings RabbitMQ | JÁ VERSIONADO / AUTOMÁTICO | Importados de `rabbitmq/definitions.json` |
-| MinIO container | AUTOMÁTICO | Criado pelo Compose |
-| Bucket `videos` | AUTOMÁTICO | Criado por `minio-init` |
-| Evento MinIO para `videos/*/original.mp4` | AUTOMÁTICO | Criado por `minio-init` no ambiente integrado |
-| Keycloak realm `fiapx` | JÁ VERSIONADO / AUTOMÁTICO | Importado de `keycloak/fiapx-realm.json` |
-| Usuários DEMO | JÁ VERSIONADO / AUTOMÁTICO | Criados pelo import do realm |
-| Mailpit | AUTOMÁTICO | Criado pelo Compose |
-| Imagens GHCR dos serviços | MANUAL OBRIGATÓRIO para image-only/CD | Produzidas pelos repositórios Management e Processing |
-| Runner self-hosted | MANUAL OBRIGATÓRIO para CD | Não é necessário para execução local |
+| PostgreSQL, Redis, RabbitMQ, MinIO, Keycloak e Mailpit | AUTOMÁTICO | Criados pelo Compose |
+| Migrations da API | AUTOMÁTICO | Executadas por `video-management-migrations` |
+| RabbitMQ exchanges, filas e bindings | JÁ VERSIONADO / AUTOMÁTICO | Importados de `rabbitmq/definitions.json` |
+| MinIO bucket `videos` | AUTOMÁTICO | Criado por `minio-init` |
+| Evento MinIO para `videos/*/original.mp4` | AUTOMÁTICO | Criado por `minio-init` |
+| Keycloak realm `fiapx` e usuários DEMO | JÁ VERSIONADO / AUTOMÁTICO | Importados de `keycloak/fiapx-realm.json` |
+| `.env` | MANUAL | Criado a partir de `.env.example` |
+| GitHub Variables | MANUAL | Criadas nos três repositórios |
+| Self-hosted runners | MANUAL | Criados nos três repositórios |
+
+### Self-hosted runners
+
+Crie cada runner no repositório correspondente:
+
+```text
+Settings > Actions > Runners > New self-hosted runner
+```
+
+Use Windows x64 e execute o comando de registro gerado pelo GitHub dentro da pasta indicada. O token de registro é temporário e não deve ser documentado.
+
+| Repositório | Diretório | Runner name |
+| --- | --- | --- |
+| `fiapx-infra` | `C:\actions-runner-infra` | `fiapx-infra-deploy` |
+| `fiapx-video-management` | `C:\actions-runner-management` | `fiapx-management-deploy` |
+| `fiapx-video-processing` | `C:\actions-runner-processing` | `fiapx-processing-deploy` |
+
+Configuração comum:
+
+| Prompt | Valor |
+| --- | --- |
+| Runner group | `Default` |
+| Additional labels | `fiap-fase5` |
+| Work folder | `_work` |
+| Run as service | `N` |
+
+Labels esperadas:
+
+```text
+self-hosted
+Windows
+X64
+fiap-fase5
+```
+
+Para iniciar cada runner:
+
+```powershell
+C:\actions-runner-infra\run.cmd
+C:\actions-runner-management\run.cmd
+C:\actions-runner-processing\run.cmd
+```
+
+Os runners precisam estar `Online` para o CD do respectivo repositório executar.
 
 ### GitHub Variables
 
-Configure em `Settings > Secrets and variables > Actions > Variables`.
+Configure nos três repositórios:
 
-| Variável | Repositório | Obrigatória | Quando |
+```text
+Settings > Secrets and variables > Actions > Variables
+```
+
+| Variável | Repositórios | Valor esperado | Uso |
 | --- | --- | --- | --- |
-| `DEPLOY_INFRA_PATH` | Infra, Management e Processing | Sim para CD | Caminho da working copy operacional da infra |
-| `BOOTSTRAP_VIDEO_MANAGEMENT_IMAGE` | Infra | Condicional | Apenas se o CD da infra precisar criar `.env` |
-| `BOOTSTRAP_VIDEO_PROCESSING_IMAGE` | Infra | Condicional | Apenas se o CD da infra precisar criar `.env` |
+| `DEPLOY_INFRA_PATH` | Infra, Management e Processing | `C:\Projetos\fiap-fase5\fiapx-infra` | Caminho da working copy operacional usada pelos scripts de CD |
 
-Valor típico de `DEPLOY_INFRA_PATH` no runner Windows:
+Variáveis condicionais apenas no `fiapx-infra`, necessárias se o CD da infra precisar criar `.env` pela primeira vez:
 
-```text
-C:\Projetos\fiap-fase5\fiapx-infra
-```
+| Variável | Valor esperado |
+| --- | --- |
+| `BOOTSTRAP_VIDEO_MANAGEMENT_IMAGE` | `ghcr.io/<owner>/fiapx-video-management:<commit-sha>` |
+| `BOOTSTRAP_VIDEO_PROCESSING_IMAGE` | `ghcr.io/<owner>/fiapx-video-processing:<commit-sha>` |
 
-As imagens de bootstrap devem estar pinadas por tag SHA de commit ou digest:
-
-```text
-ghcr.io/<owner>/fiapx-video-management:<commit-sha>
-ghcr.io/<owner>/fiapx-video-processing:<commit-sha>
-```
+As imagens de bootstrap devem estar pinadas por tag SHA de commit ou digest. Não use `latest` como referência operacional.
 
 ---
 
@@ -238,20 +279,12 @@ docker compose `
   up -d
 ```
 
-Para escalar o Worker por imagens:
-
-```powershell
-docker compose `
-  --env-file .env `
-  -f docker-compose.yml `
-  up -d --scale video-processing-service=3
-```
-
 ### URLs locais
 
 | Serviço | URL |
 | --- | --- |
 | Video Management API | `http://localhost:8080` |
+| Swagger | `http://localhost:8080/swagger` |
 | Keycloak | `http://localhost:8081` |
 | MinIO API | `http://localhost:9000` |
 | MinIO Console | `http://localhost:9001` |
@@ -286,37 +319,37 @@ Valida:
 
 ### CD
 
-O CD roda por `workflow_run` depois do CI verde em `main`. O workflow usa `head_sha`, valida se esse SHA ainda é o HEAD atual da `main` e falha fechado quando não consegue comprovar isso.
+O CD roda por `workflow_run` depois do CI aprovado em `push` na `main`. Ele usa `head_sha`, valida se esse SHA ainda é o HEAD atual da `main`, executa no runner self-hosted Windows e faz deploy na máquina local apontada por `DEPLOY_INFRA_PATH`.
 
-Runner esperado:
+`workflow_dispatch` é útil para CI, mas o caminho normal de CI + CD completo é `push` ou merge na `main`.
+
+Runner esperado para este repositório:
 
 | Item | Valor |
 | --- | --- |
-| Sistema | Windows self-hosted |
+| Diretório | `C:\actions-runner-infra` |
+| Runner name | `fiapx-infra-deploy` |
 | Labels | `self-hosted`, `Windows`, `X64`, `fiap-fase5` |
-| Pasta sugerida | `C:\actions-runner-infra` |
-| Inicialização | `run.cmd`, não Windows Service |
+| Inicialização | `C:\actions-runner-infra\run.cmd` |
 
-O deploy participa do mutex global:
+Ordem para ambiente vazio:
 
-```text
-Global\FiapXDeployLock
-```
+1. `fiapx-infra`
+2. `fiapx-video-management`
+3. `fiapx-video-processing`
 
-Ordem operacional do CD:
+A Infra cria/reconcilia as dependências e sobe a stack base. Management e Processing depois atualizam seus próprios serviços sobre o ambiente existente.
 
-1. Adquire o lock.
-2. Captura a escala existente do Processor.
-3. Atualiza a working copy operacional para o `GITHUB_SHA` implantado.
-4. Valida `.env` e Compose.
-5. Faz pull das imagens.
-6. Sobe PostgreSQL, Redis, RabbitMQ, MinIO, Keycloak e Mailpit.
-7. Reconcilia RabbitMQ.
-8. Executa `minio-init`.
-9. Executa migrations da API.
-10. Recria o Management.
-11. Recria o Processing preservando escala explícita.
-12. Valida health integrado.
+Ordem operacional do CD da Infra:
+
+1. Adquire o lock `Global\FiapXDeployLock`.
+2. Atualiza a working copy operacional para o SHA implantado.
+3. Valida `.env` e Compose.
+4. Sobe PostgreSQL, Redis, RabbitMQ, MinIO, Keycloak e Mailpit.
+5. Reconcilia RabbitMQ e MinIO.
+6. Executa migrations da API.
+7. Recria Management e Processing preservando escala explícita do Worker.
+8. Valida health integrado.
 
 O CD não executa `docker compose up -d` genérico e não remove volumes automaticamente.
 
@@ -327,28 +360,78 @@ O CD não executa `docker compose up -d` genérico e não remove volumes automat
 ### Health rápido
 
 ```powershell
+docker compose --env-file .env -f docker-compose.yml ps
 Invoke-RestMethod http://localhost:8080/health
 Invoke-RestMethod http://localhost:8081/realms/fiapx
 Invoke-RestMethod http://localhost:9000/minio/health/ready
 Invoke-WebRequest http://localhost:8025 -UseBasicParsing
 ```
 
-Verifique os containers:
+### Validação por serviço
 
-```powershell
-docker compose --env-file .env -f docker-compose.yml ps
+| Serviço | Como validar |
+| --- | --- |
+| Swagger | Abrir `http://localhost:8080/swagger` |
+| Keycloak | Abrir `http://localhost:8081`, realm `fiapx`, menu `Manage realms > fiapx > Users` |
+| Usuários DEMO | Confirmar `usertest1` e `usertest2` |
+| MinIO | Abrir `http://localhost:9001`, bucket `videos` criado automaticamente |
+| RabbitMQ | Abrir `http://localhost:15672`, filas principais criadas |
+| Mailpit | Abrir `http://localhost:8025` |
+
+Filas RabbitMQ principais:
+
+```text
+video.processing
+video.processing.retry
+video.processing.dlq
+video.status-updates
+video.status-updates.retry
+video.status-updates.dlq
 ```
 
 Verifique consumidores do Worker:
 
 ```powershell
 docker compose --env-file .env -f docker-compose.yml exec rabbitmq `
-  rabbitmqctl list_queues name consumers
+  rabbitmqctl list_queues name messages_ready messages_unacknowledged consumers
 ```
 
-A fila `video.processing` deve ter `consumer_count` maior ou igual à escala do `video-processing-service`.
+A fila `video.processing` deve ter `consumer_count >= 1`. `Ready` e `Unacked` podem ficar em `0` mesmo com tudo funcionando, pois mensagens podem ser consumidas rapidamente.
 
-### E2E integrado
+### Objetos esperados no MinIO
+
+Antes do upload, o bucket pode estar vazio. Depois do processamento:
+
+```text
+videos/{userId}/{videoId}/original.mp4
+results/{userId}/{videoId}/resultado.zip
+```
+
+### Postman e E2E
+
+A Collection e o Environment ficam no repositório [fiapx-video-management](https://github.com/fabianorodrigues/fiapx-video-management):
+
+```text
+postman/fiapx-video-management.postman_collection.json
+postman/fiapx-video-management.local.postman_environment.json
+```
+
+Fluxo esperado:
+
+1. Autenticar no Keycloak.
+2. Registrar vídeo na API.
+3. Fazer upload do `.mp4`.
+4. Consultar status até `CONCLUIDO`.
+5. Obter download.
+6. Baixar e abrir `resultado.zip`.
+
+Fluxo de erro:
+
+1. Enviar arquivo com extensão `.mp4`, mas conteúdo inválido.
+2. Aguardar status `ERRO`.
+3. Validar e-mail de falha no Mailpit.
+
+### E2E integrado por script
 
 O script E2E cria vídeos sintéticos, autentica, envia upload, valida status, baixa ZIP, exercita retry/DLQ e registra evidências em `artifacts/e2e-rabbitmq-results.json`.
 
@@ -378,20 +461,22 @@ Volumes versionados no Compose:
 | `minio-events` | Fila local de eventos AMQP do MinIO |
 | `rabbitmq-data` | Estado do RabbitMQ |
 
-Cenário suportado pelo CD:
+Recriar containers preservando volumes:
 
-```text
-containers ausentes
-images ausentes
-volumes preservados
-        |
-CD/bootstrap da infra
-        |
-pull das imagens
-        |
-recriação da stack
-        |
-health integrado
+```powershell
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+Parar preservando volumes:
+
+```powershell
+docker compose --env-file .env -f docker-compose.yml down
+```
+
+Zerar volumes apenas em ambiente DEMO/local:
+
+```powershell
+docker compose --env-file .env -f docker-compose.yml down -v
 ```
 
 O deploy não executa:
